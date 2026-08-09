@@ -4,8 +4,15 @@
 const SUPABASE_URL      = "https://dxmamdzmvyorettjxtjz.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImR4bWFtZHptdnlvcmV0dGp4dGp6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODU3NDA1MzEsImV4cCI6MjEwMTMxNjUzMX0.kLMCXl39XoqJzxcm83c8rW_tr0mlsNE2QpjA7AxAIjY";
 const TABLE_NAME        = "trash_level";   // table created by the SQL in setup
+/* ========================================================================= */
+
+// --- timing knobs -----------------------------------------------------
 const POLL_FALLBACK_MS   = 15000;                 // used only if realtime can't connect
 const BIN_OFFLINE_AFTER_MS = 30000;               // no new reading in this window = bin considered offline
+const POLL_FALLBACK_MS       = 3000;   // used only if realtime can't connect (was 15000)
+const REALTIME_GRACE_MS      = 3000;   // how long to wait for "SUBSCRIBED" before polling (was 6000)
+const RECONNECT_RETRY_MS     = 5000;   // while polling, how often to retry the realtime channel
+const BIN_LINK_TICK_MS       = 1000;   // how often to re-check online/offline + "last seen" text (was 5000)
 /* ========================================================================= */
 
 const isConfigured = !SUPABASE_URL.includes("YOUR-PROJECT-REF") &&
