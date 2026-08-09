@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Smart Bin Monitor — SmartBin</title>
+
+<!-- Supabase JS client -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+<!-- Stylesheet (same folder as this file) -->
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<div class="wrap">
+
+  <!-- ============ CONFIG BANNER (only shows if Supabase isn't set up) ============ -->
+  <div id="configBanner" class="banner" style="display:none;">
+    Supabase isn't connected yet. Open <code>script.js</code> and set
+    <code>SUPABASE_URL</code> and <code>SUPABASE_ANON_KEY</code> near the top.
+  </div>
+
+  <!-- ============ MAIN DASHBOARD CARD ============ -->
+  <div class="card">
+    <div class="card-header">
+      <div>
+        <p class="eyebrow"><u>TRASH_LEVEL</u> — UNIT 01</p>
+        <h1 class="title">Smart Bin Monitor</h1>
+      </div>
+      <div class="conn">
+        <span id="connDot" class="conn-dot"></span>
+        <span id="connText">connecting</span>
+      </div>
+    </div>
+
+    <div class="gauge-zone">
+      <div class="gauge">
+        <svg viewBox="0 0 256 256">
+          <circle class="ring-track" cx="128" cy="128" r="108"></circle>
+          <circle id="ringValue" class="ring-value" cx="128" cy="128" r="108"
+                  stroke="var(--c-offline)"
+                  stroke-dasharray="678.6"
+                  stroke-dashoffset="678.6"></circle>
+        </svg>
+        <div class="gauge-center">
+          <div class="pct-row">
+            <span id="pctNum" class="pct-num">—&nbsp;—</span>
+            <span class="pct-sign">%</span>
+          </div>
+          <div id="statusBadge" class="status-badge">waiting</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="divider"></div>
+
+    <div class="status-row">
+      <div class="status-tile">
+        <p class="foot-label">Lid</p>
+        <div class="status-tile-value">
+          <span id="lidDot" class="status-tile-dot"></span>
+          <span id="lidVal">—</span>
+        </div>
+      </div>
+      <div class="status-tile">
+        <p class="foot-label">Bin link</p>
+        <div class="status-tile-value">
+          <span id="linkDot" class="status-tile-dot"></span>
+          <span id="linkVal">—</span>
+        </div>
+        <p id="linkSub" class="status-tile-sub">waiting for data</p>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- App logic (same folder as this file) -->
+<script src="script.js"></script>
+</body>
+</html>
