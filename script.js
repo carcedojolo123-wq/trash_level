@@ -6,11 +6,9 @@ const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 const TABLE_NAME        = "trash_level";   // table created by the SQL in setup
 
 // --- timing knobs -----------------------------------------------------
-const POLL_FALLBACK_MS       = 3000;   // used only if realtime can't connect (was 15000)
-const REALTIME_GRACE_MS      = 3000;   // how long to wait for "SUBSCRIBED" before polling (was 6000)
+const POLL_FALLBACK_MS       = 3000;   // used only if realtime can't connect
+const REALTIME_GRACE_MS      = 3000;   // how long to wait for "SUBSCRIBED" before polling
 const RECONNECT_RETRY_MS     = 8000;   // while polling, how often to retry the realtime channel
-const BIN_LINK_TICK_MS       = 1000;   // how often to re-check online/offline + "last seen" text (was 5000)
-const BIN_OFFLINE_AFTER_MS   = 30000;  // no new reading in this window = bin considered offline
 /* ========================================================================= */
 
 const isConfigured = !SUPABASE_URL.includes("YOUR-PROJECT-REF") &&
@@ -22,13 +20,6 @@ const els = {
   ring: document.getElementById('ringValue'),
   pctNum: document.getElementById('pctNum'),
   statusBadge: document.getElementById('statusBadge'),
-  lidTile: document.getElementById('lidVal')?.closest('.status-tile'),
-  lidDot: document.getElementById('lidDot'),
-  lidVal: document.getElementById('lidVal'),
-  linkTile: document.getElementById('linkVal')?.closest('.status-tile'),
-  linkDot: document.getElementById('linkDot'),
-  linkVal: document.getElementById('linkVal'),
-  linkSub: document.getElementById('linkSub'),
   configBanner: document.getElementById('configBanner'),
 };
 
@@ -50,28 +41,10 @@ function levelStatus(pct){
   return 'full';
 }
 
-function fmtTime(iso){
-  const d = new Date(iso);
-  return d.toLocaleString(undefined, {
-    month:'short', day:'2-digit',
-    hour:'2-digit', minute:'2-digit', second:'2-digit', hour12:false
-  });
-}
-
 function setConnection(state){
   // state: 'connecting' | 'live' | 'polling' | 'error'
   els.connDot.className = 'conn-dot' + (state === 'live' ? ' live' : state === 'error' ? ' error' : '');
   els.connText.textContent = state;
-}
-
-// brief highlight so a change feels instant/confirmed, not just "different text"
-function flash(el){
-  if (!el) return;
-  el.classList.remove('flash');
-  // force reflow so the animation can restart if it's already mid-flash
-  void el.offsetWidth;
-  el.classList.add('flash');
-  setTimeout(() => el.classList.remove('flash'), 700);
 }
 
 function renderGauge(pct){
@@ -90,94 +63,20 @@ function renderGauge(pct){
   els.statusBadge.style.borderColor = color;
 }
 
-let lastLidOpen = undefined;
-function renderLid(lidOpen){
-  // lidOpen: true | false | null (unknown)
-  const changed = lidOpen !== lastLidOpen;
-  lastLidOpen = lidOpen;
-
-  if (lidOpen === null || lidOpen === undefined){
-    els.lidDot.style.background = 'var(--c-offline)';
-    els.lidVal.textContent = '—';
-    els.lidVal.style.color = 'var(--text-muted)';
-    return;
-  }
-  const color = lidOpen ? 'var(--c-almost)' : 'var(--c-empty)';
-  els.lidDot.style.background = color;
-  els.lidVal.textContent = lidOpen ? 'open' : 'closed';
-  els.lidVal.style.color = color;
-  if (changed) flash(els.lidTile);
-}
-
-let lastOnline = undefined;
-function renderBinLink(online, lastSeenAt){
-  // online: true | false | null (no data yet)
-  if (online === null){
-    els.linkDot.className = 'status-tile-dot';
-    els.linkDot.style.background = 'var(--c-offline)';
-    els.linkVal.textContent = '—';
-    els.linkVal.style.color = 'var(--text-muted)';
-    els.linkSub.textContent = 'waiting for data';
-    lastOnline = null;
-    return;
-  }
-  const changed = online !== lastOnline;
-  lastOnline = online;
-
-  const color = online ? 'var(--c-empty)' : 'var(--c-full)';
-  els.linkDot.className = 'status-tile-dot' + (online ? ' pulse' : '');
-  els.linkDot.style.background = color;
-  els.linkVal.textContent = online ? 'online' : 'offline';
-  els.linkVal.style.color = color;
-  els.linkSub.textContent = lastSeenAt ? `last seen ${fmtRelative(lastSeenAt)}` : '';
-  if (changed) flash(els.linkTile);
-}
-
-function fmtRelative(iso){
-  const seconds = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 1000));
-  if (seconds < 5) return 'just now';
-  if (seconds < 60) return `${seconds}s ago`;
-  const mins = Math.round(seconds / 60);
-  if (mins < 60) return `${mins}m ago`;
-  const hrs = Math.round(mins / 60);
-  return `${hrs}h ago`;
-}
-
 /* ---------------------------------------------------------------------- */
 
 let supabaseClient = null;
 let pollTimer = null;
 let reconnectTimer = null;
 let realtimeChannel = null;
-let lastSeenAt = null;
 let isLive = false;
-
-function isLidOpen(row){
-  if (!row) return null;
-  if (typeof row.lid_open === 'boolean') return row.lid_open;
-  if (typeof row.lid_status === 'string') return row.lid_status.toLowerCase() === 'open';
-  return null;
-}
 
 function applyRow(row){
   if (!row){
     renderGauge(null);
-    renderLid(null);
     return;
   }
   renderGauge(Number(row.trash_level));
-  renderLid(isLidOpen(row));
-  lastSeenAt = row.created_at;
-  refreshBinLink();
-}
-
-function refreshBinLink(){
-  if (!lastSeenAt){
-    renderBinLink(null, null);
-    return;
-  }
-  const elapsed = Date.now() - new Date(lastSeenAt).getTime();
-  renderBinLink(elapsed <= BIN_OFFLINE_AFTER_MS, lastSeenAt);
 }
 
 async function fetchLatest(){
@@ -249,8 +148,6 @@ async function init(){
     setConnection('error');
     els.connText.textContent = 'not configured';
     renderGauge(null);
-    renderLid(null);
-    renderBinLink(null, null);
     return;
   }
 
@@ -264,9 +161,6 @@ async function init(){
   setTimeout(() => {
     if (!isLive) startPollingFallback();
   }, REALTIME_GRACE_MS);
-
-  // re-evaluate bin online/offline continuously, since it's time-based
-  setInterval(refreshBinLink, BIN_LINK_TICK_MS);
 
   // if the tab/phone was backgrounded, browsers throttle timers/sockets —
   // force an immediate refetch the moment it's foregrounded again
