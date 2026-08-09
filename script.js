@@ -1,7 +1,7 @@
 /* =========================================================================
    SMARTBIN CONFIG — edit these three lines to connect your Supabase project
    ========================================================================= */
-const SUPABASE_URL      = "https://dxmamdzmvyorettjxtjz.supabase.co/rest/v1/trash_level";
+const SUPABASE_URL      = "https://dxmamdzmvyorettjxtjz.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImR4bWFtZHptdnlvcmV0dGp4dGp6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODU3NDA1MzEsImV4cCI6MjEwMTMxNjUzMX0.kLMCXl39XoqJzxcm83c8rW_tr0mlsNE2QpjA7AxAIjY";
 const TABLE_NAME        = "trash_level";   // table created by the SQL in setup
 const POLL_FALLBACK_MS   = 15000;                 // used only if realtime can't connect
