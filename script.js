@@ -4,15 +4,13 @@
 const SUPABASE_URL      = "https://dxmamdzmvyorettjxtjz.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImR4bWFtZHptdnlvcmV0dGp4dGp6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODU3NDA1MzEsImV4cCI6MjEwMTMxNjUzMX0.kLMCXl39XoqJzxcm83c8rW_tr0mlsNE2QpjA7AxAIjY";
 const TABLE_NAME        = "trash_level";   // table created by the SQL in setup
-/* ========================================================================= */
 
 // --- timing knobs -----------------------------------------------------
-const POLL_FALLBACK_MS   = 15000;                 // used only if realtime can't connect
-const BIN_OFFLINE_AFTER_MS = 30000;               // no new reading in this window = bin considered offline
 const POLL_FALLBACK_MS       = 3000;   // used only if realtime can't connect (was 15000)
 const REALTIME_GRACE_MS      = 3000;   // how long to wait for "SUBSCRIBED" before polling (was 6000)
-const RECONNECT_RETRY_MS     = 5000;   // while polling, how often to retry the realtime channel
+const RECONNECT_RETRY_MS     = 8000;   // while polling, how often to retry the realtime channel
 const BIN_LINK_TICK_MS       = 1000;   // how often to re-check online/offline + "last seen" text (was 5000)
+const BIN_OFFLINE_AFTER_MS   = 30000;  // no new reading in this window = bin considered offline
 /* ========================================================================= */
 
 const isConfigured = !SUPABASE_URL.includes("YOUR-PROJECT-REF") &&
@@ -24,8 +22,10 @@ const els = {
   ring: document.getElementById('ringValue'),
   pctNum: document.getElementById('pctNum'),
   statusBadge: document.getElementById('statusBadge'),
+  lidTile: document.getElementById('lidVal')?.closest('.status-tile'),
   lidDot: document.getElementById('lidDot'),
   lidVal: document.getElementById('lidVal'),
+  linkTile: document.getElementById('linkVal')?.closest('.status-tile'),
   linkDot: document.getElementById('linkDot'),
   linkVal: document.getElementById('linkVal'),
   linkSub: document.getElementById('linkSub'),
@@ -64,6 +64,16 @@ function setConnection(state){
   els.connText.textContent = state;
 }
 
+// brief highlight so a change feels instant/confirmed, not just "different text"
+function flash(el){
+  if (!el) return;
+  el.classList.remove('flash');
+  // force reflow so the animation can restart if it's already mid-flash
+  void el.offsetWidth;
+  el.classList.add('flash');
+  setTimeout(() => el.classList.remove('flash'), 700);
+}
+
 function renderGauge(pct){
   const color = levelColor(pct);
   const clamped = pct === null || pct === undefined ? 0 : Math.max(0, Math.min(100, pct));
@@ -80,8 +90,12 @@ function renderGauge(pct){
   els.statusBadge.style.borderColor = color;
 }
 
+let lastLidOpen = undefined;
 function renderLid(lidOpen){
   // lidOpen: true | false | null (unknown)
+  const changed = lidOpen !== lastLidOpen;
+  lastLidOpen = lidOpen;
+
   if (lidOpen === null || lidOpen === undefined){
     els.lidDot.style.background = 'var(--c-offline)';
     els.lidVal.textContent = '—';
@@ -92,8 +106,10 @@ function renderLid(lidOpen){
   els.lidDot.style.background = color;
   els.lidVal.textContent = lidOpen ? 'open' : 'closed';
   els.lidVal.style.color = color;
+  if (changed) flash(els.lidTile);
 }
 
+let lastOnline = undefined;
 function renderBinLink(online, lastSeenAt){
   // online: true | false | null (no data yet)
   if (online === null){
@@ -102,14 +118,19 @@ function renderBinLink(online, lastSeenAt){
     els.linkVal.textContent = '—';
     els.linkVal.style.color = 'var(--text-muted)';
     els.linkSub.textContent = 'waiting for data';
+    lastOnline = null;
     return;
   }
+  const changed = online !== lastOnline;
+  lastOnline = online;
+
   const color = online ? 'var(--c-empty)' : 'var(--c-full)';
   els.linkDot.className = 'status-tile-dot' + (online ? ' pulse' : '');
   els.linkDot.style.background = color;
   els.linkVal.textContent = online ? 'online' : 'offline';
   els.linkVal.style.color = color;
   els.linkSub.textContent = lastSeenAt ? `last seen ${fmtRelative(lastSeenAt)}` : '';
+  if (changed) flash(els.linkTile);
 }
 
 function fmtRelative(iso){
@@ -126,7 +147,10 @@ function fmtRelative(iso){
 
 let supabaseClient = null;
 let pollTimer = null;
+let reconnectTimer = null;
+let realtimeChannel = null;
 let lastSeenAt = null;
+let isLive = false;
 
 function isLidOpen(row){
   if (!row) return null;
@@ -173,23 +197,47 @@ async function fetchLatest(){
 }
 
 function startPollingFallback(){
-  if (pollTimer) return;
-  setConnection('polling');
-  pollTimer = setInterval(fetchLatest, POLL_FALLBACK_MS);
+  isLive = false;
+  if (!pollTimer){
+    setConnection('polling');
+    pollTimer = setInterval(fetchLatest, POLL_FALLBACK_MS);
+  }
+  // keep trying to get back onto realtime instead of being stuck polling forever
+  if (!reconnectTimer){
+    reconnectTimer = setInterval(() => {
+      if (!isLive) subscribeRealtime();
+    }, RECONNECT_RETRY_MS);
+  }
+}
+
+function stopPollingFallback(){
+  if (pollTimer){ clearInterval(pollTimer); pollTimer = null; }
+  if (reconnectTimer){ clearInterval(reconnectTimer); reconnectTimer = null; }
 }
 
 function subscribeRealtime(){
-  const channel = supabaseClient
-    .channel('smartbin-live')
+  // avoid stacking duplicate channels on retry
+  if (realtimeChannel){
+    supabaseClient.removeChannel(realtimeChannel);
+    realtimeChannel = null;
+  }
+
+  realtimeChannel = supabaseClient
+    .channel('smartbin-live-' + Date.now())
     .on('postgres_changes',
-      { event: 'INSERT', schema: 'public', table: TABLE_NAME },
+      // listen for INSERT (new reading rows) and UPDATE (in case the device
+      // upserts a single row instead of inserting a new one each time)
+      { event: '*', schema: 'public', table: TABLE_NAME },
       (payload) => applyRow(payload.new)
     )
     .subscribe((status) => {
       if (status === 'SUBSCRIBED'){
+        isLive = true;
         setConnection('live');
-        if (pollTimer){ clearInterval(pollTimer); pollTimer = null; }
+        stopPollingFallback();
+        fetchLatest(); // catch up on anything missed while reconnecting
       } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED'){
+        isLive = false;
         startPollingFallback();
       }
     });
@@ -212,13 +260,22 @@ async function init(){
   await fetchLatest();
   subscribeRealtime();
 
-  // safety net: if realtime never confirms within 6s, fall back to polling
+  // safety net: if realtime never confirms quickly, fall back to polling
   setTimeout(() => {
-    if (els.connText.textContent === 'connecting') startPollingFallback();
-  }, 6000);
+    if (!isLive) startPollingFallback();
+  }, REALTIME_GRACE_MS);
 
   // re-evaluate bin online/offline continuously, since it's time-based
-  setInterval(refreshBinLink, 5000);
+  setInterval(refreshBinLink, BIN_LINK_TICK_MS);
+
+  // if the tab/phone was backgrounded, browsers throttle timers/sockets —
+  // force an immediate refetch the moment it's foregrounded again
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible'){
+      fetchLatest();
+      if (!isLive) subscribeRealtime();
+    }
+  });
 }
 
 init();
